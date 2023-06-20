@@ -1,6 +1,7 @@
 <?php
   // Magento initialization
   require_once '../app/Mage.php';
+  include 'src/credentials.php';
   include 'src/functions.php';
   Mage::app();
 
