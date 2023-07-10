@@ -20,6 +20,14 @@
     'x-api-key: ' . API_KEY
   );
 
+  $count = 1;
+	$flag = false;
+
+	if(!empty($_GET['count']))
+		$count = $_GET['count'];
+
+	$productCount = 0;
+
   // Initialize cURL
   $curl = curl_init();
 
@@ -51,7 +59,7 @@
       // 'family' => 'Accesorios',
       'subfamily' => 'Masques',
       'page_size' => 1,
-      'page_number' => 1,
+      'page_number' => $count,
     );
 
     curl_setopt_array($curl, array(
@@ -68,6 +76,12 @@
       echo 'Error connecting to the API: ' . curl_error($curl);
     } 
     else {
+      $products = json_decode($response, true);
+      if(empty($products)){
+        echo 'All products were successfully imported';
+        return true;
+      }
+      
       // Create / Retrieve the AttributeSet for Product Attributes
       if(!$attributeSetID = addAttributeSet("TopTex Attributes"))
         die("Couldn't find attribute set.");
@@ -84,7 +98,6 @@
         die("Couldn't find attribute 'Talla'.");
       
       $parentCatID = addCategory("TopTex");
-      $products = json_decode($response, true);
       foreach ($products['items'] as $productData) {
         // Import or get parent and children category
         $categoryIds = array();
@@ -97,72 +110,44 @@
           continue;
         }
 
-        /* ------------------------ IMAGE DOWNLOAD CODE ------------------------ */
+        // Download the product base images (Global for every combinaction)
+        $imagesURL = array();
+        foreach ($productData['images'] as $image)
+          $imagesURL[] = $image['url'];
 
-        // // Download the file using cURL
-        // $tmpImgPath = array();
-        // curl_setopt_array($curl, array(
-        //   CURLOPT_RETURNTRANSFER => 1,
-        //   CURLOPT_FOLLOWLOCATION => 1,
-        //   CURLOPT_SSL_VERIFYPEER => 0,
-        //   CURLOPT_SSL_VERIFYHOST => 0,
-        //   CURLOPT_TIMEOUT => 120
-        // ));
-            
-        // // Upload images
-        // foreach ($productData['images'] as $image) {
-        //   $fileTransferUrl = $image['url'];
+        $baseImagesPath = downloadImageFromURL($curl, $imagesURL);
 
-        //   // Download the file using cURL
-        //   curl_setopt($curl, CURLOPT_URL, $fileTransferUrl);
-        //   curl_setopt($curl, CURLOPT_HEADER, 1);
-        //   curl_setopt($curl, CURLOPT_NOBODY, 1);
-        //   $header = curl_exec($curl);
-
-        //   // Check for errors
-        //   if ($header === false) {
-        //     echo 'Error getting the image: ' . curl_error($curl);
-        //   } 
-        //   else {
-        //     $filename = '';
-        //     if (preg_match('/filename="(.*?)"/', $header, $matches)) {
-        //         $filename = $matches[1];
-        //     }
-
-        //     // Download the file and save it with the extracted filename
-        //     curl_setopt($curl, CURLOPT_HEADER, 0);
-        //     curl_setopt($curl, CURLOPT_NOBODY, 0);
-        //     $fileData = curl_exec($curl);
-
-        //     if ($fileData !== false) {
-        //       $tmpImgPath[] = Mage::getBaseDir('media') . DS . 'import' . DS . $filename;
-        //       file_put_contents(end($tmpImgPath), $fileData);
-        //     } else {
-        //         echo "Failed to download the image using the File Transfer URL: " . $fileTransferUrl . "\n";
-        //     }
-        //   }
-        // }
-
-        /* ------------------------ END OF IMAGE DOWNLOAD CODE ------------------------ */
-        
         // Import or get product attributes
         $combinationCount = 0;
-        $simpleProductsIds = array();
+        $basePrice = 0;
+        $configurableProductsData = array();
 
         foreach($productData['colors'] as $productColor){
           $colorAttributeOptionID = addAttributeOption($colorAttribute, $productColor['colors']['es']);
+  
+          // Download the product specific images (Based on the "Color" attribute)
+          $imagesURL = array();
+          foreach ($productColor['packshots'] as $image)
+            $imagesURL[] = $image['url'];
+
+          $colorImagesPath = downloadImageFromURL($curl, $imagesURL);
+
           foreach($productColor['sizes'] as $productSize){
             $sizeAttributeOptionID = addAttributeOption($sizeAttribute, $productSize['size']);
+
+            $productName = $productData['designation']['es'];
+            $productName .= ' - ' . $colorAttribute->getFrontendLabel() . ' ' . $productColor['colors']['es'];
+            $productName .= ' - ' . $sizeAttribute->getFrontendLabel() . ' ' . $productSize['size'];
 
             // Define the simple product data
             $productDataMagento = array(
               'sku' => $productSize['sku'],
-              'name' => $productData['designation']['es'] . ' ' .  $combinationCount,
+              'name' => $productName,
               'description' => $productData['description']['es'],
               'short_description' => $productData['description']['es'],
               'attribute_set_id' => $attributeSetID,
               'type_id' => 'simple',
-              'price' => 100.00,
+              'price' => $productSize['publicUnitPrice'],
               'weight' => 0, // Set the weight of the product
               'tax_class_id' => 2, // Set the tax class ID, 2 represents the default tax class
               'status' => 1,
@@ -179,27 +164,10 @@
             $product->setCategoryIds($categoryIds);  
             try {
               $product->save();
+              updateProductStock($product->getId());
 
-              // Get the stock item associated with the product
-              $stockItem = Mage::getModel('cataloginventory/stock_item')->loadByProduct($product->getId());
-              
-              // Create a new stock item if it doesn't exist
-              if (!$stockItem->getId()) {
-                $stockItem->setData('product_id', $product->getId());
-                $stockItem->setData('stock_id', 1); // Replace with the appropriate stock ID if necessary
-              }
-
-              // Set manage stock and is_in_stock values
-              $stockItem->setData('manage_stock', 1); // 1 = Active, 0 = Inactive
-              $stockItem->setData('is_in_stock', 1); // 1 = In stock, 0 = Out of stock
-
-              // Save the stock item
-              $stockItem->save();
-              
-              $connection = Mage::getSingleton('core/resource')->getConnection('core_write');
-              $connection->update('mg_cataloginventory_stock_item', [
-                'qty' => 1
-              ], "item_id = " . $stockItem->getId());
+              if(!$combinationCount++)
+                $basePrice = $productSize['publicUnitPrice'];
 
               /* ------------------------ PRODUCT IMAGE LINKING CODE ------------------------ */
 
@@ -223,14 +191,22 @@
               //   }
               // }
 
-              // $product->setMediaGallery(array('images' => array(), 'values' => array()))->save();
+              $product->setMediaGallery(array('images' => array(), 'values' => array()))->save();
               // $k = 0;
-              // foreach($tmpImgPath as $img){
-              //   if($k++ == 0)
+              // foreach($baseImagesPath as $img){
+              //   // if($k++ == 0)
               //     $product->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
-              //   else
-              //     $product->addImageToMediaGallery($img, null, false, false);
-              //   $product->save();
+              //   // else
+              //     // $product->addImageToMediaGallery($img, null, false, false);
+              //   // $product->save();
+              // }
+
+              // foreach($colorImagesPath as $img){
+              //   // if($k++ == 0)
+              //     $product->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
+              //   // else
+              //     // $product->addImageToMediaGallery($img, null, false, false);
+              //   // $product->save();
               // }
 
               // Regenerate the product's thumbnails and resized images
@@ -241,35 +217,98 @@
               
               /* ------------------------ END OF PRODUCT IMAGE LINKING CODE ------------------------ */
 
-              $simpleProductsIds[] = $product->getId();
+              
+              $configurableProductsData[$product->getId()][0] = array(
+                'label' => $productSize['size'],
+                'attribute_id' => $sizeAttribute->getId(),
+                // 'value_index' => '24',
+                'is_percent' => '0', 
+                'pricing_value' => ''
+              );
+              $configurableProductsData[$product->getId()][1] = array(
+                'label' => $productColor['colors']['es'],           //attribute label
+                'attribute_id' => $colorAttribute->getId(),         //attribute ID of attribute
+                // 'value_index' => '24',                           //value of 'Green' index of the attribute 'color'
+                'is_percent' => '0',                                //fixed/percent price for this option
+                'pricing_value' => ''                               //value for the pricing
+              );
+
             } catch (Exception $e) {
               echo "Error: " . $e->getMessage() . "\n";
             }
           }
         }
 
-        // if(!empty($simpleProductsIds)){
-        //   $configurableProduct = Mage::getModel('catalog/product');
-        //   $configurableProduct
-        //     ->setSku('configurable-product')
-        //     ->setAttributeSetId(4) // Replace with the appropriate attribute set ID
-        //     ->setTypeId('configurable')
-        //     ->setWebsiteIds(array(1)) // Replace with the appropriate website ID
-        //     ->setVisibility(Mage_Catalog_Model_Product_Visibility::VISIBILITY_BOTH) // Change visibility as needed
-        //     ->setStatus(Mage_Catalog_Model_Product_Status::STATUS_ENABLED) // Change status as needed
-        //     ->setName('Configurable Product')
-        //     ->setPrice(0) // Set the initial price
-        //     ->setDescription('This is a configurable product')
-        //     ->setShortDescription('Configurable Product')
-        //     ->setStockData(array(
-        //         'manage_stock' => 1,
-        //         'is_in_stock' => 1,
-        //     ))
-        //     ->save();
-        // }
+        if(!empty($configurableProductsData)){
+          $configurableProduct = Mage::getModel('catalog/product');
+          $configurableProduct
+            ->setSku($productData['catalogReference'])
+            ->setName($productData['designation']['es']) //product name
+            ->setDescription($productData['description']['es'])
+            ->setShortDescription($productData['description']['es'])
+            ->setAttributeSetId($attributeSetID) // Replace with the appropriate attribute set ID
+            ->setTypeId('configurable')
+            ->setWebsiteIds(array(1)) // Replace with the appropriate website ID
+            ->setVisibility(Mage_Catalog_Model_Product_Visibility::VISIBILITY_BOTH) // Change visibility as needed
+            ->setStatus(Mage_Catalog_Model_Product_Status::STATUS_ENABLED) // Change status as needed
+            ->setPrice($basePrice) // Set the initial price
+            ->setTaxClassId(2); //tax class (0 - none, 1 - default, 2 - taxable, 4 - shipping)
+            
+          $configurableProduct->setCategoryIds($categoryIds);  
+          $configurableProduct->getTypeInstance()->setUsedProductAttributeIds([$colorAttribute->getId(), $sizeAttribute->getId()]);
+          $configurableAttributesData = $configurableProduct->getTypeInstance()->getConfigurableAttributesAsArray();
+          
+          $configurableProduct->setCanSaveConfigurableAttributes(true);
+          $configurableProductTest = Mage::getModel('catalog/product')->loadByAttribute('sku', $productData['catalogReference']);
+          if (!$configurableProductTest || $configurableProductTest->getTypeId() != 'configurable')
+            $configurableProduct->setConfigurableAttributesData($configurableAttributesData);
+
+          $configurableProduct->setConfigurableProductsData($configurableProductsData);
+          
+          $configurableProduct->save();
+
+          updateProductStock($configurableProduct->getId(), true);
+
+          $configurableProduct->setMediaGallery(array('images' => array(), 'values' => array()))->save();
+          foreach($baseImagesPath as $img){
+            // if($k++ == 0)
+              $configurableProduct->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
+            // else
+              // $product->addImageToMediaGallery($img, null, false, false);
+            // $product->save();
+          }
+
+          // Clear cache
+          Mage::app()->getCacheInstance()->cleanType('block_html');
+        }
       }
-      echo "Product import complete.";
+      $productCount++;
     }
   }
+
+  if($productCount < 1)
+    $flag = true; 
+    
   curl_close($curl);
 ?>
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="src/jquery-3.6.0.slim.min.js"></script>
+  </head>    
+  <body>
+    <script>
+      $( document ).ready(function() {
+        var url = window.location.href;
+        var count = '<?php echo $count; ?>';
+        var flag = '<?php echo $flag; ?>';
+        count =  parseInt(count) + 1
+        if(count)
+          url = url.split('?');
+        if(!flag)
+          window.location.replace(url[0]+"?count="+count);
+      });
+    </script>
+  </body>
+</html>

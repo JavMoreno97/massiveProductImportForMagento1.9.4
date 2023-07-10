@@ -385,3 +385,102 @@
 
     return $attributeOption->getId() ? $attributeOption->getId() : null;
   }
+
+  /**
+     * Retrieve Attribute Option ID if exists (Search by option value).
+     *
+     * @param int $productID Product ID
+     * @param boolean $isConfigurable Set to "true" if if product is configurable. Default is simple product.
+     *
+     * @return boolean true
+  */
+  function updateProductStock ($productID, $isConfigurable = false){
+    // Get the stock item associated with the product
+    $stockItem = Mage::getModel('cataloginventory/stock_item')->loadByProduct($productID);
+                
+    // Create a new stock item if it doesn't exist
+    if (!$stockItem->getId()) {
+      $stockItem->setData('product_id', $productID);
+      $stockItem->setData('stock_id', 1); // Replace with the appropriate stock ID if necessary
+    }
+
+    // Set manage stock and is_in_stock values
+    $stockItem->setData('manage_stock', 1); // 1 = Active, 0 = Inactive
+    $stockItem->setData('is_in_stock', 1); // 1 = In stock, 0 = Out of stock
+
+    // Save the stock item
+    $stockItem->save();
+    
+    if(!$isConfigurable){
+      $connection = Mage::getSingleton('core/resource')->getConnection('core_write');
+      $connection->update('mg_cataloginventory_stock_item', [
+        'qty' => 1
+      ], "item_id = " . $stockItem->getId());
+    }
+
+    return true;
+  }
+
+  /**
+     * Retrieve Attribute Option ID if exists (Search by option value).
+     *
+     * @param object $curlInstance Instance of a curl conexion previously stablished
+     * @param array $imagesURL A list with all the images URLs to be downloaded.
+     * @param string $downloadFolder The path where the images will be saved (Leave blank to use default Magento folder).
+     *
+     * @return array Images download path
+  */
+  function downloadImageFromURL($curlInstance, $imagesURL, $downloadFolder = ''){
+    // Download the file using cURL
+    $tmpImgPath = array();
+    curl_setopt_array($curlInstance, array(
+      CURLOPT_RETURNTRANSFER => 1,
+      CURLOPT_FOLLOWLOCATION => 1,
+      CURLOPT_SSL_VERIFYPEER => 0,
+      CURLOPT_SSL_VERIFYHOST => 0,
+      CURLOPT_TIMEOUT => 120
+    ));
+
+    if(empty($downloadFolder))
+      $downloadFolder = Mage::getBaseDir('media') . DS . 'import';
+        
+    // Upload images
+    foreach ($imagesURL as $imageURL) {
+      $fileTransferUrl = $imageURL;
+
+      // Download the file using cURL
+      curl_setopt($curlInstance, CURLOPT_URL, $fileTransferUrl);
+      curl_setopt($curlInstance, CURLOPT_HEADER, 1);
+      curl_setopt($curlInstance, CURLOPT_NOBODY, 1);
+      $header = curl_exec($curlInstance);
+
+      // Check for errors
+      if ($header === false) {
+        echo 'Error getting the image: ' . curl_error($curlInstance);
+      } 
+      else {
+        $filename = '';
+        if (preg_match('/filename="(.*?)"/', $header, $matches)) {
+            $filename = $matches[1];
+        }
+
+        if(!file_exists($downloadFolder . DS . $filename)){
+          // Download the file and save it with the extracted filename
+          curl_setopt($curlInstance, CURLOPT_HEADER, 0);
+          curl_setopt($curlInstance, CURLOPT_NOBODY, 0);
+          $fileData = curl_exec($curlInstance);
+
+          if ($fileData !== false) {
+            $tmpImgPath[] = $downloadFolder . DS . $filename;
+            file_put_contents(end($tmpImgPath), $fileData);
+          } else {
+              echo "Failed to download the image using the File Transfer URL: " . $fileTransferUrl . "\n";
+          }
+        }
+        else
+          $tmpImgPath[] = $downloadFolder . DS . $filename;  
+      }
+    }
+
+    return $tmpImgPath;
+  }
