@@ -271,7 +271,7 @@
       $attribute->setAttributeCode(str_replace(" ", "-", strtolower($attributeName)) . '_toptex');
       $attribute->setEntityTypeId($entityTypeId);
       $attribute->setFrontendInput('select');
-      $attribute->setBackendType('varchar');
+      $attribute->setBackendType('int');
       $attribute->setFrontendLabel($attributeName);
       $attribute->setAttributeSetId($attributeSetID);
       $attribute->setAttributeGroupId($attributeGroupID);
@@ -405,7 +405,10 @@
     }
 
     // Set manage stock and is_in_stock values
-    $stockItem->setData('manage_stock', 1); // 1 = Active, 0 = Inactive
+    if(!$isConfigurable)
+      $stockItem->setData('manage_stock', 1); // 1 = Active, 0 = Inactive
+    else
+      $stockItem->setData('manage_stock', 0); // 1 = Active, 0 = Inactive
     $stockItem->setData('is_in_stock', 1); // 1 = In stock, 0 = Out of stock
 
     // Save the stock item

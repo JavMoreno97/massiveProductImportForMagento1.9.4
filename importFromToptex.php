@@ -79,6 +79,9 @@
       $products = json_decode($response, true);
       if(empty($products)){
         echo 'All products were successfully imported';
+        
+        // Clear cache
+        Mage::app()->getCacheInstance()->cleanType('block_html');
         return true;
       }
       
@@ -126,11 +129,11 @@
           $colorAttributeOptionID = addAttributeOption($colorAttribute, $productColor['colors']['es']);
   
           // Download the product specific images (Based on the "Color" attribute)
-          $imagesURL = array();
-          foreach ($productColor['packshots'] as $image)
-            $imagesURL[] = $image['url'];
+          // $imagesURL = array();
+          // foreach ($productColor['packshots'] as $image)
+          //   $imagesURL[] = $image['url'];
 
-          $colorImagesPath = downloadImageFromURL($curl, $imagesURL);
+          // $colorImagesPath = downloadImageFromURL($curl, $imagesURL);
 
           foreach($productColor['sizes'] as $productSize){
             $sizeAttributeOptionID = addAttributeOption($sizeAttribute, $productSize['size']);
@@ -160,7 +163,28 @@
             
             $product->setData($sizeAttribute->getAttributeCode(), (int)$sizeAttributeOptionID);
             $product->setData($colorAttribute->getAttributeCode(), (int)$colorAttributeOptionID);
-            
+            $product->setWebsiteIds(array(Mage::app()->getStore(true)->getWebsite()->getId()));
+
+            $product->setNewsFromDate(null);
+            $product->setNewsToDate(null);
+            $product->setSpecialPrice(null);
+            $product->setSpecialFromDate(null);
+            $product->setSpecialToDate(null);
+            $product->setCustomDesignFrom(null);
+            $product->setCustomDesignTo(null);
+            $product->setMsrp(null); // Set MSRP to null
+            $product->setData('is_recurring', 0); // Set "is_recurring" attribute to 0
+            $product->setMetaTitle(null); // Set meta title to NULL
+            $product->setMetaDescription(null); // Set meta title to NULL
+            $product->setCustomLayoutUpdate(null); // Set custom layout update to NULL
+            $product->setCustomDesign(null); // Set custom design to NULL
+            $product->setPageLayout(null); // Set page layout to NULL
+            $product->setGiftMessageAvailable($giftMessageAvailable); // Set the gift message availability
+            $product->setCountryOfManufacture($countryOfManufacture); // Set the country of manufacture
+            $product->setMsrpEnabled(2); // Enable MSRP
+            $product->setMsrpDisplayActualPriceType(4); // Display actual price
+
+    
             $product->setCategoryIds($categoryIds);  
             try {
               $product->save();
@@ -169,53 +193,42 @@
               if(!$combinationCount++)
                 $basePrice = $productSize['publicUnitPrice'];
 
-              /* ------------------------ PRODUCT IMAGE LINKING CODE ------------------------ */
-
-              // Get the product's media gallery
-              // $mediaGallery = $product->getMediaGallery('images');
-
-              // if (is_array($mediaGallery) && count($mediaGallery) > 0) {
-              //   foreach ($mediaGallery as $mediaGalleryEntry) {
-              //     $file = $mediaGalleryEntry->getFile();
-              //     $subDirectory = substr($file, 0, 2); // Extract the first two characters
-          
-              //     $filePath = Mage::getBaseDir('media') . DS . 'catalog' . DS . 'product' . DS . $subDirectory . DS . $file;
-          
-              //     // Unlink the image from the product
-              //     $product->removeImage($file);
-          
-              //     // Delete the image file from the directory
-              //     if (file_exists($filePath)) {
-              //         unlink($filePath);
+              /* ------------------------ SIMPLE PRODUCT IMAGE LINKING CODE ------------------------ */
+              // $attributes = $product->getTypeInstance()->getSetAttributes();
+              // if (isset ( $attributes ['media_gallery'] )) {
+              //   $gallery = $attributes ['media_gallery'];
+              //   //Get the images
+              //   $galleryData = $product->getMediaGallery ();
+              //   foreach ( $galleryData ['images'] as $image ) {
+              //     //If image exists
+              //     if ($gallery->getBackend()->getImage ( $product, $image ['file'] )) {
+              //       $gallery->getBackend()->removeImage ( $product, $image ['file'] );
               //     }
               //   }
+              //   $product->save ();
               // }
 
-              $product->setMediaGallery(array('images' => array(), 'values' => array()))->save();
-              // $k = 0;
-              // foreach($baseImagesPath as $img){
-              //   // if($k++ == 0)
-              //     $product->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
-              //   // else
-              //     // $product->addImageToMediaGallery($img, null, false, false);
-              //   // $product->save();
+              // foreach ( $baseImagesPath as $img )
+              // {
+              //     try {
+              //       $product->setMediaGallery ( array ('images' => array (), 'values' => array () ) );
+              //       $product->addImageToMediaGallery ( $img, array ("thumbnail", "small_image", "image" ), false, false )->save();
+              //     } catch ( Exception $e ) {
+              //       echo $e->getMessage ();
+              //     }
               // }
 
-              // foreach($colorImagesPath as $img){
-              //   // if($k++ == 0)
-              //     $product->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
-              //   // else
-              //     // $product->addImageToMediaGallery($img, null, false, false);
-              //   // $product->save();
+              // foreach ( $colorImagesPath as $img )
+              // {
+              //     try {
+              //       $product->setMediaGallery ( array ('images' => array (), 'values' => array () ) );
+              //       $product->addImageToMediaGallery ( $img, array ("thumbnail", "small_image", "image" ), false, false )->save();
+              //     } catch ( Exception $e ) {
+              //       echo $e->getMessage ();
+              //     }
               // }
-
-              // Regenerate the product's thumbnails and resized images
-              // Mage::getModel('catalog/product_image')->clearCache();
-              // Mage::getModel('catalog/product_image')->init($product, 'image')->resize();
-              // Mage::getModel('catalog/product_image')->init($product, 'small_image')->resize();
-              // Mage::getModel('catalog/product_image')->init($product, 'thumbnail')->resize();
               
-              /* ------------------------ END OF PRODUCT IMAGE LINKING CODE ------------------------ */
+              /* ------------------------ END OF SIMPLE PRODUCT IMAGE LINKING CODE ------------------------ */
 
               
               $configurableProductsData[$product->getId()][0] = array(
@@ -248,38 +261,73 @@
             ->setShortDescription($productData['description']['es'])
             ->setAttributeSetId($attributeSetID) // Replace with the appropriate attribute set ID
             ->setTypeId('configurable')
-            ->setWebsiteIds(array(1)) // Replace with the appropriate website ID
+            ->setWebsiteIds(array(Mage::app()->getStore(true)->getWebsite()->getId()))
             ->setVisibility(Mage_Catalog_Model_Product_Visibility::VISIBILITY_BOTH) // Change visibility as needed
             ->setStatus(Mage_Catalog_Model_Product_Status::STATUS_ENABLED) // Change status as needed
             ->setPrice($basePrice) // Set the initial price
-            ->setTaxClassId(2); //tax class (0 - none, 1 - default, 2 - taxable, 4 - shipping)
+            ->setTaxClassId(2) //tax class (0 - none, 1 - default, 2 - taxable, 4 - shipping)
+            ->setNewsFromDate(null)
+            ->setNewsToDate(null)
+            ->setSpecialPrice(null)
+            ->setSpecialFromDate(null)
+            ->setSpecialToDate(null)
+            ->setCustomDesign(null) // Set custom design to NULL
+            ->setCustomDesignFrom(null)
+            ->setCustomDesignTo(null)
+            ->setMsrp(null) // Set MSRP to null
+            ->setData('is_recurring', 0) // Set "is_recurring" attribute to 0;
+            ->setCustomLayoutUpdate(null) // Set custom layout update to NULL
+            ->setPageLayout(null) // Set page layout to NULL
+            ->setMetaDescription(null)
+            ->setMetaTitle(null) // Set)meta title to NULL
+            ->setMsrpEnabled(2) // Enable MSRP
+            ->setMsrpDisplayActualPriceType(4); // Display actual price
+
             
           $configurableProduct->setCategoryIds($categoryIds);  
+
+          /* ------------------------ CONFIGURABLE PRODUCT IMAGE LINKING CODE ------------------------ */
+          $attributes = $configurableProduct->getTypeInstance()->getSetAttributes();
+          if (isset ( $attributes ['media_gallery'] )) {
+            $gallery = $attributes ['media_gallery'];
+            //Get the images
+            $galleryData = $configurableProduct->getMediaGallery ();
+            foreach ( $galleryData ['images'] as $image ) {
+              //If image exists
+              if ($gallery->getBackend()->getImage ( $configurableProduct, $image ['file'] )) {
+                $gallery->getBackend()->removeImage ( $configurableProduct, $image ['file'] );
+              }
+            }
+          }
+
+          if(empty($baseImagesPath))
+            $configurableProduct->save();
+
+          foreach ( $baseImagesPath as $img )
+          {
+              try {
+                $configurableProduct->save();
+                $configurableProduct->setMediaGallery ( array ('images' => array (), 'values' => array () ) );
+                $configurableProduct->addImageToMediaGallery ( $img, array ("thumbnail", "small_image", "image" ), false, false );
+              } catch ( Exception $e ) {
+                echo $e->getMessage ();
+              }
+          }
+          /* ------------------------ END OF CONFIGURABLE PRODUCT IMAGE LINKING CODE ------------------------ */
+
           $configurableProduct->getTypeInstance()->setUsedProductAttributeIds([$colorAttribute->getId(), $sizeAttribute->getId()]);
           $configurableAttributesData = $configurableProduct->getTypeInstance()->getConfigurableAttributesAsArray();
           
           $configurableProduct->setCanSaveConfigurableAttributes(true);
           $configurableProductTest = Mage::getModel('catalog/product')->loadByAttribute('sku', $productData['catalogReference']);
-          if (!$configurableProductTest || $configurableProductTest->getTypeId() != 'configurable')
+          // if (!$configurableProductTest || $configurableProductTest->getTypeId() != 'configurable')
             $configurableProduct->setConfigurableAttributesData($configurableAttributesData);
 
           $configurableProduct->setConfigurableProductsData($configurableProductsData);
-          
+    
           $configurableProduct->save();
 
           updateProductStock($configurableProduct->getId(), true);
-
-          $configurableProduct->setMediaGallery(array('images' => array(), 'values' => array()))->save();
-          foreach($baseImagesPath as $img){
-            // if($k++ == 0)
-              $configurableProduct->addImageToMediaGallery($img, array('image', 'small_image', 'thumbnail'), false, false);
-            // else
-              // $product->addImageToMediaGallery($img, null, false, false);
-            // $product->save();
-          }
-
-          // Clear cache
-          Mage::app()->getCacheInstance()->cleanType('block_html');
         }
       }
       $productCount++;
